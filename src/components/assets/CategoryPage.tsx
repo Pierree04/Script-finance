@@ -23,7 +23,9 @@ import {
   assetSubtype,
   assetTicker,
   hasGain,
+  isAutoQuoted,
 } from './assetDisplay';
+import { Zap } from 'lucide-react';
 
 interface CategoryPageProps {
   category: AssetCategory;
@@ -150,6 +152,14 @@ export function CategoryPage({ category, description }: CategoryPageProps) {
                           {ticker && (
                             <span className="text-xs text-slate-400">
                               {ticker}
+                            </span>
+                          )}
+                          {isAutoQuoted(asset) && (
+                            <span
+                              className="inline-flex items-center gap-0.5 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700 dark:bg-brand-950/40 dark:text-brand-300"
+                              title="Cours mis à jour automatiquement"
+                            >
+                              <Zap size={10} /> Auto
                             </span>
                           )}
                         </div>

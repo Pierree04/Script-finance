@@ -65,3 +65,12 @@ export function assetTicker(asset: Asset): string | null {
   }
   return null;
 }
+
+/** Vrai si le cours de la ligne est mis à jour automatiquement. */
+export function isAutoQuoted(asset: Asset): boolean {
+  return (
+    (asset.category === 'bourse' || asset.category === 'crypto') &&
+    asset.priceSource === 'auto' &&
+    Boolean(asset.linkedSymbol)
+  );
+}

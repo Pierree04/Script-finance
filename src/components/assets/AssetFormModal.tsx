@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link2, Loader2, X } from 'lucide-react';
 import type {
   Asset,
   AssetCategory,
   CashAccountType,
   LiabilityType,
+  QuoteLink,
   RealEstateType,
   StockEnvelope,
 } from '../../types';
@@ -17,7 +19,13 @@ import {
 import { CATEGORY_LABELS } from '../../lib/constants';
 import { parseDecimal, parseDecimalOr } from '../../lib/parse';
 import { CATEGORY_FIELDS, type FieldDef } from './assetFields';
-import type { NewAsset } from '../../store/useStore';
+import { SymbolSearchField } from './SymbolSearchField';
+import { useStore, type NewAsset } from '../../store/useStore';
+import {
+  fetchPriceInEur,
+  MarketDataError,
+  type SymbolResult,
+} from '../../lib/marketData';
 
 type Values = Record<string, string>;
 type Errors = Record<string, string>;
@@ -73,6 +81,7 @@ function buildAsset(
   category: AssetCategory,
   values: Values,
   asset: Asset | null,
+  link: QuoteLink,
 ): Asset | NewAsset {
   const num = (name: string): number => parseDecimalOr(values[name]);
   const str = (name: string): string => values[name].trim();
@@ -80,19 +89,10 @@ function buildAsset(
   const idPart = asset ? { id: asset.id } : {};
 
   switch (category) {
-    case 'liquidites':
-      return {
-        ...idPart,
-        category,
-        label: str('label'),
-        accountType: values.accountType as CashAccountType,
-        amount: num('amount'),
-        note,
-        updatedAt: '',
-      };
     case 'bourse':
       return {
         ...idPart,
+        ...link,
         category,
         label: str('label'),
         envelope: values.envelope as StockEnvelope,
@@ -106,12 +106,23 @@ function buildAsset(
     case 'crypto':
       return {
         ...idPart,
+        ...link,
         category,
         label: str('label'),
         tickerOrIsin: str('tickerOrIsin') || undefined,
         quantity: num('quantity'),
         avgBuyPrice: num('avgBuyPrice'),
         currentPrice: num('currentPrice'),
+        note,
+        updatedAt: '',
+      };
+    case 'liquidites':
+      return {
+        ...idPart,
+        category,
+        label: str('label'),
+        accountType: values.accountType as CashAccountType,
+        amount: num('amount'),
         note,
         updatedAt: '',
       };
@@ -169,6 +180,21 @@ function buildAsset(
   }
 }
 
+/** Extrait le lien de cours d'une ligne existante (Bourse / Crypto). */
+function initialLink(asset: Asset | null): QuoteLink {
+  if (asset && (asset.category === 'bourse' || asset.category === 'crypto')) {
+    return {
+      linkedSymbol: asset.linkedSymbol,
+      exchange: asset.exchange,
+      micCode: asset.micCode,
+      quoteCurrency: asset.quoteCurrency,
+      priceSource: asset.priceSource ?? 'manual',
+      lastQuoteAt: asset.lastQuoteAt,
+    };
+  }
+  return { priceSource: 'manual' };
+}
+
 /** Formulaire modal d'ajout / édition d'une ligne, piloté par CATEGORY_FIELDS. */
 export function AssetFormModal({
   open,
@@ -177,19 +203,90 @@ export function AssetFormModal({
   onClose,
   onSubmit,
 }: AssetFormModalProps) {
+  const apiKey = useStore((s) => s.settings.marketApiKey);
   const fields = useMemo(() => CATEGORY_FIELDS[category], [category]);
+  const quotable = category === 'bourse' || category === 'crypto';
+
   const [values, setValues] = useState<Values>(() =>
     initialValues(category, asset),
   );
   const [errors, setErrors] = useState<Errors>({});
+  const [link, setLink] = useState<QuoteLink>(() => initialLink(asset));
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const fxCache = useRef<Map<string, number>>(new Map());
 
   // Réinitialise le formulaire à chaque ouverture / changement de cible.
   useEffect(() => {
     if (open) {
       setValues(initialValues(category, asset));
       setErrors({});
+      setLink(initialLink(asset));
+      setLinking(false);
+      setLinkError(null);
+      fxCache.current = new Map();
     }
   }, [open, category, asset]);
+
+  const isLinked = link.priceSource === 'auto' && Boolean(link.linkedSymbol);
+
+  // Sélection d'un instrument : on lie la ligne et on récupère son cours.
+  const handleSelectSymbol = async (result: SymbolResult) => {
+    setLink({
+      linkedSymbol: result.symbol,
+      exchange: result.exchange || undefined,
+      micCode: result.micCode || undefined,
+      quoteCurrency: result.currency || undefined,
+      priceSource: 'auto',
+      lastQuoteAt: undefined,
+    });
+    // Pré-remplit le libellé et le symbole si vides.
+    if (values.label.trim() === '') setValue('label', result.name);
+    if ((values.tickerOrIsin ?? '').trim() === '') {
+      setValue('tickerOrIsin', result.symbol);
+    }
+
+    if (!apiKey) return;
+    setLinking(true);
+    setLinkError(null);
+    try {
+      const { priceEur, currency } = await fetchPriceInEur(
+        {
+          linkedSymbol: result.symbol,
+          exchange: result.exchange || undefined,
+          micCode: result.micCode || undefined,
+        },
+        apiKey,
+        fxCache.current,
+      );
+      setValue('currentPrice', String(Math.round(priceEur * 100) / 100));
+      setLink((prev) => ({
+        ...prev,
+        quoteCurrency: currency || prev.quoteCurrency,
+        lastQuoteAt: new Date().toISOString(),
+      }));
+    } catch (err) {
+      setLinkError(
+        err instanceof MarketDataError
+          ? err.message
+          : 'Récupération du cours impossible.',
+      );
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const handleUnlink = () => {
+    setLink({
+      linkedSymbol: undefined,
+      exchange: undefined,
+      micCode: undefined,
+      quoteCurrency: undefined,
+      priceSource: 'manual',
+      lastQuoteAt: undefined,
+    });
+    setLinkError(null);
+  };
 
   const setValue = (name: string, value: string) => {
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -211,7 +308,7 @@ export function AssetFormModal({
       setErrors(nextErrors);
       return;
     }
-    onSubmit(buildAsset(category, values, asset));
+    onSubmit(buildAsset(category, values, asset, link));
   };
 
   return (
@@ -227,6 +324,59 @@ export function AssetFormModal({
         }}
         className="space-y-4"
       >
+        {quotable && !isLinked && (
+          <SymbolSearchField
+            label="Suivre un cours automatiquement (optionnel)"
+            cryptoOnly={category === 'crypto'}
+            onSelect={(r) => void handleSelectSymbol(r)}
+          />
+        )}
+
+        {quotable && isLinked && (
+          <div className="rounded-lg border border-brand-200 bg-brand-50 p-3 dark:border-brand-900/60 dark:bg-brand-950/30">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm">
+                <Link2 size={16} className="text-brand-600" />
+                <span>
+                  Cours automatique lié à{' '}
+                  <span className="font-semibold">{link.linkedSymbol}</span>
+                  {link.quoteCurrency && (
+                    <span className="text-slate-500 dark:text-slate-400">
+                      {' '}
+                      ({link.quoteCurrency})
+                    </span>
+                  )}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleUnlink}
+                className="rounded p-1 text-slate-500 hover:bg-white/60 hover:text-red-600 dark:hover:bg-slate-800"
+                aria-label="Supprimer le lien et repasser en saisie manuelle"
+                title="Repasser en saisie manuelle"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {linking && (
+              <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                <Loader2 size={12} className="animate-spin" /> Récupération du
+                cours…
+              </p>
+            )}
+            {linkError && (
+              <p className="mt-1 text-xs text-red-500">{linkError}</p>
+            )}
+            {!linking && !linkError && (
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Le cours ci-dessous est mis à jour automatiquement (converti en
+                euros) à l’ouverture de l’application et via le bouton «
+                Rafraîchir ».
+              </p>
+            )}
+          </div>
+        )}
+
         {fields.map((field) => {
           const value = values[field.name] ?? '';
           const error = errors[field.name];

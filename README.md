@@ -128,6 +128,24 @@ patrimoine net, cas limites comme les listes vides, `NaN` et division par zéro)
 le parsing des saisies numériques à la française, ainsi que l'aller-retour
 export / import JSON sans perte de données.
 
+## Cours de marché (optionnel)
+
+Les lignes **Bourse** et **Crypto** peuvent être reliées à un instrument coté
+pour mettre à jour leur cours automatiquement (cours **différés**, convertis en
+euros — pas du temps réel à la seconde).
+
+1. Créez une clé d’API **gratuite** sur [Twelve Data](https://twelvedata.com/pricing).
+2. Dans **Réglages → Cours en direct**, collez la clé puis « Vérifier et
+   enregistrer ». La clé est stockée **uniquement dans votre navigateur**.
+3. À l’ajout/édition d’une ligne Bourse ou Crypto, utilisez le champ de
+   recherche (ex. tapez « LVMH ») et sélectionnez l’instrument.
+4. Les cours se rafraîchissent à l’ouverture de l’app et via le bouton
+   **« Rafraîchir »** en haut de l’écran.
+
+Confidentialité : seuls les **symboles** (ex. « LVMH ») sont envoyés au
+fournisseur ; jamais vos quantités ni vos montants. La saisie manuelle du cours
+reste disponible (il suffit de ne pas lier la ligne, ou de retirer le lien).
+
 ## Limites connues
 
 - Les données sont **locales au navigateur** : vider les données du navigateur

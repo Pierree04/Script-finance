@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { ThemeToggle } from './ThemeToggle';
+import { RefreshQuotesButton } from './RefreshQuotesButton';
 import { useStore } from '../../store/useStore';
 import { netWorth } from '../../lib/calculations';
 import { formatCurrency } from '../../lib/format';
@@ -33,7 +34,10 @@ export function Layout() {
               <p className="text-lg font-semibold">{formatCurrency(total)}</p>
             </div>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <RefreshQuotesButton />
+            <ThemeToggle />
+          </div>
         </header>
 
         <main className="flex-1 px-4 py-6 lg:px-8 lg:py-8">

@@ -1,9 +1,12 @@
 import { useRef, useState } from 'react';
 import {
+  Activity,
   AlertTriangle,
   CheckCircle2,
   Download,
+  ExternalLink,
   FlaskConical,
+  Loader2,
   Moon,
   Sun,
   Trash2,
@@ -12,6 +15,7 @@ import {
 import { useStore } from '../store/useStore';
 import { PageHeader } from '../components/ui/PageHeader';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { MarketDataError, validateApiKey } from '../lib/marketData';
 
 type Feedback = { type: 'success' | 'error'; text: string } | null;
 
@@ -25,8 +29,14 @@ export default function Reglages() {
   const assets = useStore((s) => s.assets);
   const snapshots = useStore((s) => s.snapshots);
 
+  const marketApiKey = useStore((s) => s.settings.marketApiKey);
+  const setApiKey = useStore((s) => s.setApiKey);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
+  const [keyInput, setKeyInput] = useState(marketApiKey ?? '');
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [keyStatus, setKeyStatus] = useState<Feedback>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmImport, setConfirmImport] = useState(false);
   const [confirmSample, setConfirmSample] = useState(false);
@@ -89,6 +99,40 @@ export default function Reglages() {
     });
   };
 
+  const handleSaveKey = async () => {
+    const trimmed = keyInput.trim();
+    if (trimmed === '') {
+      setKeyStatus({ type: 'error', text: 'Saisissez une clé d’API.' });
+      return;
+    }
+    setKeyBusy(true);
+    setKeyStatus(null);
+    try {
+      await validateApiKey(trimmed);
+      await setApiKey(trimmed);
+      setKeyStatus({
+        type: 'success',
+        text: 'Clé valide et enregistrée. Les cours se mettront à jour.',
+      });
+    } catch (err) {
+      setKeyStatus({
+        type: 'error',
+        text:
+          err instanceof MarketDataError
+            ? err.message
+            : 'Impossible de vérifier la clé.',
+      });
+    } finally {
+      setKeyBusy(false);
+    }
+  };
+
+  const handleRemoveKey = async () => {
+    await setApiKey('');
+    setKeyInput('');
+    setKeyStatus({ type: 'success', text: 'Clé supprimée.' });
+  };
+
   const confirmDoReset = async () => {
     setConfirmReset(false);
     await resetAll();
@@ -145,6 +189,84 @@ export default function Reglages() {
               <Moon size={18} /> Sombre
             </button>
           </div>
+        </section>
+
+        {/* Cours en direct (marchés) */}
+        <section className="card">
+          <h2 className="mb-1 flex items-center gap-2 text-lg font-semibold">
+            <Activity size={18} className="text-brand-600" />
+            Cours en direct (marchés financiers)
+          </h2>
+          <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
+            Reliez vos lignes Bourse et Crypto à un instrument coté pour mettre
+            à jour leur cours automatiquement (cours différés, convertis en
+            euros). Collez ci-dessous votre clé d’API gratuite. Elle est stockée
+            uniquement sur cet appareil ; seuls les symboles (ex. « LVMH ») sont
+            envoyés, jamais vos montants.
+          </p>
+          <a
+            href="https://twelvedata.com/pricing"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline"
+          >
+            Obtenir une clé gratuite (Twelve Data)
+            <ExternalLink size={14} />
+          </a>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="password"
+              className="input-base"
+              placeholder="Collez votre clé d’API ici"
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              autoComplete="off"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn-primary whitespace-nowrap"
+                onClick={() => void handleSaveKey()}
+                disabled={keyBusy}
+              >
+                {keyBusy ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <CheckCircle2 size={16} />
+                )}
+                Vérifier et enregistrer
+              </button>
+              {marketApiKey && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => void handleRemoveKey()}
+                  disabled={keyBusy}
+                >
+                  Retirer
+                </button>
+              )}
+            </div>
+          </div>
+
+          {keyStatus && (
+            <p
+              className={`mt-2 text-sm ${
+                keyStatus.type === 'success'
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-red-500'
+              }`}
+            >
+              {keyStatus.text}
+            </p>
+          )}
+          {marketApiKey && !keyStatus && (
+            <p className="mt-2 text-sm text-emerald-600 dark:text-emerald-400">
+              Une clé est configurée. Le bouton « Rafraîchir » est disponible en
+              haut de l’écran.
+            </p>
+          )}
         </section>
 
         {/* Sauvegarde / restauration */}

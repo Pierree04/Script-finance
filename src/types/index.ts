@@ -47,24 +47,48 @@ export interface CashAsset extends BaseAsset {
 /** Enveloppe boursière. */
 export type StockEnvelope = 'pea' | 'pea_pme' | 'cto';
 
+/** Origine du cours actuel : saisi à la main ou récupéré depuis le marché. */
+export type PriceSource = 'manual' | 'auto';
+
+/**
+ * Lien optionnel d'une ligne vers un instrument coté, pour mettre à jour
+ * automatiquement son cours. Seul le symbole est envoyé au fournisseur ;
+ * jamais les quantités ni les montants.
+ */
+export interface QuoteLink {
+  /** Symbole interrogé (ex : "AAPL", "MC", "BTC/USD"). */
+  linkedSymbol?: string;
+  /** Bourse / place (ex : "Euronext"). */
+  exchange?: string;
+  /** Code MIC de la place (ex : "XPAR"). */
+  micCode?: string;
+  /** Devise dans laquelle le cours est coté (ex : "USD", "EUR"). */
+  quoteCurrency?: string;
+  /** Origine du cours actuel (par défaut : manuel). */
+  priceSource?: PriceSource;
+  /** Date ISO du dernier rafraîchissement automatique. */
+  lastQuoteAt?: string;
+}
+
 /** Bourse : une ligne = un titre (action ou ETF). */
-export interface StockAsset extends BaseAsset {
+export interface StockAsset extends BaseAsset, QuoteLink {
   category: 'bourse';
   envelope: StockEnvelope;
   tickerOrIsin?: string;
   quantity: number;
   /** Prix de revient unitaire. */
   pru: number;
-  /** Cours actuel saisi manuellement. */
+  /** Cours actuel (saisi ou récupéré automatiquement), exprimé en euros. */
   currentPrice: number;
 }
 
 /** Crypto-monnaie. */
-export interface CryptoAsset extends BaseAsset {
+export interface CryptoAsset extends BaseAsset, QuoteLink {
   category: 'crypto';
   tickerOrIsin?: string;
   quantity: number;
   avgBuyPrice: number;
+  /** Cours actuel (saisi ou récupéré automatiquement), exprimé en euros. */
   currentPrice: number;
 }
 
@@ -142,6 +166,8 @@ export interface Snapshot {
 export interface Settings {
   theme: 'light' | 'dark';
   currency: string;
+  /** Clé d'API du fournisseur de cours (Twelve Data), stockée localement. */
+  marketApiKey?: string;
 }
 
 /** Format du fichier d'export / import (sauvegarde complète). */

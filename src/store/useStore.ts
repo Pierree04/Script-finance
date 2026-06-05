@@ -4,7 +4,14 @@
 // ============================================================================
 
 import { create } from 'zustand';
-import type { Asset, AssetCategory, Settings, Snapshot } from '../types';
+import type {
+  Asset,
+  AssetCategory,
+  CryptoAsset,
+  Settings,
+  Snapshot,
+  StockAsset,
+} from '../types';
 import {
   dbClearAll,
   dbDeleteAsset,
@@ -25,6 +32,7 @@ import {
 } from '../lib/calculations';
 import { buildBackup, parseBackup, serializeBackup } from '../lib/backup';
 import { buildSampleAssets, buildSampleSnapshots } from '../lib/sampleData';
+import { fetchPriceInEur, MarketDataError } from '../lib/marketData';
 
 const DEFAULT_SETTINGS: Settings = { theme: 'light', currency: '€' };
 
@@ -45,6 +53,14 @@ export type NewAsset = Omit<Asset, 'id' | 'updatedAt'> & { id?: string };
 export interface ImportResult {
   ok: boolean;
   error?: string;
+}
+
+/** Bilan d'un rafraîchissement des cours de marché. */
+export interface RefreshResult {
+  updated: number;
+  errors: number;
+  /** Premier message d'erreur rencontré (pour informer l'utilisateur). */
+  firstError?: string;
 }
 
 interface StoreState {
@@ -74,6 +90,19 @@ interface StoreState {
   importJSON: (raw: string) => Promise<ImportResult>;
   loadSample: () => Promise<void>;
   resetAll: () => Promise<void>;
+
+  // Cours de marché
+  setApiKey: (key: string) => Promise<void>;
+  refreshQuotes: () => Promise<RefreshResult>;
+}
+
+/** Lignes dont le cours peut être récupéré automatiquement. */
+function isAutoQuotable(asset: Asset): asset is StockAsset | CryptoAsset {
+  return (
+    (asset.category === 'bourse' || asset.category === 'crypto') &&
+    asset.priceSource === 'auto' &&
+    Boolean(asset.linkedSymbol)
+  );
 }
 
 /** Applique la classe de thème sur <html>. */
@@ -104,6 +133,11 @@ export const useStore = create<StoreState>((set, get) => ({
       settings: resolvedSettings,
       loaded: true,
     });
+
+    // Rafraîchissement automatique des cours à l'ouverture (non bloquant).
+    if (resolvedSettings.marketApiKey) {
+      void get().refreshQuotes();
+    }
   },
 
   setTheme: async (theme) => {
@@ -197,5 +231,78 @@ export const useStore = create<StoreState>((set, get) => ({
   resetAll: async () => {
     await dbClearAll();
     set({ assets: [], snapshots: [] });
+  },
+
+  setApiKey: async (key) => {
+    const trimmed = key.trim();
+    const settings: Settings = {
+      ...get().settings,
+      marketApiKey: trimmed === '' ? undefined : trimmed,
+    };
+    set({ settings });
+    await dbPutSettings(settings);
+  },
+
+  refreshQuotes: async () => {
+    const apiKey = get().settings.marketApiKey;
+    if (!apiKey) {
+      return {
+        updated: 0,
+        errors: 0,
+        firstError: 'Aucune clé d’API configurée (voir Réglages).',
+      };
+    }
+
+    // Lignes liées à un instrument et en mode automatique.
+    const linked = get().assets.filter(isAutoQuotable);
+
+    if (linked.length === 0) {
+      return { updated: 0, errors: 0 };
+    }
+
+    const fxCache = new Map<string, number>();
+    const now = new Date().toISOString();
+    const updates = new Map<string, Asset>();
+    let errors = 0;
+    let firstError: string | undefined;
+
+    for (const asset of linked) {
+      try {
+        const { priceEur, currency } = await fetchPriceInEur(
+          {
+            linkedSymbol: asset.linkedSymbol,
+            exchange: asset.exchange,
+            micCode: asset.micCode,
+          },
+          apiKey,
+          fxCache,
+        );
+        updates.set(asset.id, {
+          ...asset,
+          currentPrice: Math.round(priceEur * 100) / 100,
+          quoteCurrency: currency,
+          lastQuoteAt: now,
+        });
+      } catch (err) {
+        errors += 1;
+        if (!firstError) {
+          firstError =
+            err instanceof MarketDataError
+              ? err.message
+              : 'Erreur lors de la récupération d’un cours.';
+        }
+      }
+    }
+
+    if (updates.size > 0) {
+      for (const asset of updates.values()) {
+        await dbPutAsset(asset);
+      }
+      set({
+        assets: get().assets.map((a) => updates.get(a.id) ?? a),
+      });
+    }
+
+    return { updated: updates.size, errors, firstError };
   },
 }));
