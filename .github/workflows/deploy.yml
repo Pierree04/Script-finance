@@ -1,0 +1,64 @@
+name: Déploiement GitHub Pages
+
+# Met l'application en ligne automatiquement à chaque mise à jour de la branche.
+on:
+  push:
+    branches: ['claude/festive-wright-VYV7j']
+  workflow_dispatch:
+
+# Droits nécessaires pour publier sur GitHub Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Une seule mise en ligne à la fois.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupération du code
+        uses: actions/checkout@v4
+
+      - name: Installation de Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Installation des dépendances
+        run: npm ci
+
+      - name: Vérifications (types + lint + tests)
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run test
+
+      - name: Construction de l'application
+        run: npm run build
+
+      - name: Configuration de GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Envoi des fichiers du site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Mise en ligne
+        id: deployment
+        uses: actions/deploy-pages@v4
